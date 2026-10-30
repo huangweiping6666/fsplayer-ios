@@ -6,10 +6,10 @@ on:
       scheme:
         description: 'Xcode Scheme to build'
         required: true
-        default: 'AuraPlayer'
+        default: 'FSPlayerDemo'
         type: choice
         options:
-          - AuraPlayer
+          - FSPlayerDemo
           - FSPlayer
 
 jobs:
@@ -27,76 +27,58 @@ jobs:
       with:
         xcode-version: latest-stable
     
-    - name: Install XcodeGen
-      run: |
-        brew install xcodegen
-    
-    - name: Generate Xcode Project
-      run: |
-        chmod +x generate-proj.sh
-        ./generate-proj.sh
-    
     - name: List Available Schemes
       run: |
         cd examples/ios
-        xcodebuild -list -project AuraPlayer.xcodeproj
+        echo "=== Available Projects ==="
+        ls -la *.xcodeproj
+        echo ""
+        echo "=== FSPlayer Schemes ==="
+        xcodebuild -list -project FSPlayer.xcodeproj || true
+        echo ""
+        echo "=== FSPlayerDemo Schemes ==="
+        xcodebuild -list -project FSPlayerDemo.xcodeproj || true
     
     - name: Build IPA
       run: |
         cd examples/ios
         
-        # 创建导出配置
-        cat > exportOptions.plist << EOF
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>method</key>
-            <string>development</string>
-            <key>teamID</key>
-            <string>RSJCUT9MB9</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-                <key>cn.debugly.AuraPlayer</key>
-                <string>iOS Team Provisioning Profile</string>
-            </dict>
-        </dict>
-        </plist>
-        EOF
+        # 根据用户选择的 scheme 确定项目
+        if [[ "${{ github.event.inputs.scheme }}" == "FSPlayerDemo" ]]; then
+          PROJECT="FSPlayerDemo.xcodeproj"
+          SCHEME="FSPlayerDemo"
+        else
+          PROJECT="FSPlayer.xcodeproj"
+          SCHEME="FSPlayer"
+        fi
         
-        # 构建 Archive
+        echo "Building $SCHEME from $PROJECT"
+        
+        # 构建 Archive（不签名）
         xcodebuild archive \
-          -project AuraPlayer.xcodeproj \
-          -scheme "${{ github.event.inputs.scheme }}" \
+          -project "$PROJECT" \
+          -scheme "$SCHEME" \
           -configuration Release \
-          -archivePath build/AuraPlayer.xcarchive \
+          -archivePath build/App.xcarchive \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_ALLOWED=NO \
+          -allowProvisioningUpdates
         
-        # 导出 IPA
-        xcodebuild -exportArchive \
-          -archivePath build/AuraPlayer.xcarchive \
-          -exportPath build \
-          -exportOptionsPlist exportOptions.plist || true
+        # 打包成 IPA
+        echo "Creating unsigned IPA..."
+        cd build/App.xcarchive/Products/Applications
+        mkdir Payload
+        cp -r *.app Payload/
+        zip -r ../../../../${SCHEME}-unsigned.ipa Payload
+        cd ../../../..
         
-        # 如果导出失败，直接打包 .app
-        if [ ! -f build/*.ipa ]; then
-          echo "Direct IPA export failed, creating unsigned IPA from .app"
-          cd build/AuraPlayer.xcarchive/Products/Applications
-          mkdir Payload
-          cp -r AuraPlayer.app Payload/
-          zip -r ../../../../AuraPlayer-unsigned.ipa Payload
-          cd ../../../..
-        fi
+        echo "IPA created: ${SCHEME}-unsigned.ipa"
+        ls -lh *.ipa
     
     - name: Upload IPA
       uses: actions/upload-artifact@v4
       with:
-        name: AuraPlayer-iOS
-        path: |
-          examples/ios/build/*.ipa
-          examples/ios/build/AuraPlayer.xcarchive/Products/Applications/AuraPlayer.app
+        name: ${{ github.event.inputs.scheme }}-iOS
+        path: examples/ios/*.ipa
         retention-days: 7
