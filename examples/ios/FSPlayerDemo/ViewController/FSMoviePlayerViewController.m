@@ -96,7 +96,7 @@
         [options setPlayerOptionValue:@"fcc-bgr0" forKey:@"overlay-format"];
         [options setPlayerOptionValue:@"fcc-_es2" forKey:@"overlay-format"];
     }
-    //�?启硬�?
+    //开启硬解
     [options setPlayerOptionIntValue:isVideoToolBox forKey:@"videotoolbox_hwaccel"];
 
     options.automaticallySetupAudioSession = YES;
@@ -105,7 +105,7 @@
     self.player = [[FSPlayer alloc] initWithContent:self.url options:options];
     self.player.playbackLoop = 2;
     //设置代理，拿到当前渲染帧
-    // [self.player.view setDisplayDelegate:self]; // removed in FSPlayer 1.1.2 API
+    // [self.player.view setDisplayDelegate:self]; // removed in FSPlayer 1.1.2
     self.player.scalingMode = FSScalingModeAspectFit;
     self.player.shouldAutoplay = YES;
     
@@ -290,7 +290,7 @@
                 if (error) {
                     NSLog(@"保存到相册失败：%@",error);
                 } else {
-                    NSLog(@"保存到相册成�?");
+                    NSLog(@"保存到相册成功");
                 }
             }];
         } else {
@@ -338,15 +338,15 @@ static NSString *recordVideoPath = nil;
         if (!extension) {
             extension = @"mkv";
         }
-        // 格式化为字符�?
+        // 格式化为字符串
         NSString *fileName = [NSString stringWithFormat:@"%lld.%@", timestamp, extension];
         // 构建完整文件路径
         NSString *filePath = [cacheDirectory stringByAppendingPathComponent:fileName];
         int error = [self.player startFastRecord:filePath];
         if (error) {
-            NSLog(@"�?始录�?:%d",error);
+            NSLog(@"开始录制:%d",error);
         } else {
-            NSLog(@"�?始录�?:%@",filePath);
+            NSLog(@"开始录制:%@",filePath);
             recordVideoPath = filePath;
         }
     }
