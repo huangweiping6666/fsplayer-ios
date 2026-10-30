@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       scheme:
-        description: 'Xcode Scheme to build'
+        description: 'Target to build'
         required: true
-        default: 'FSPlayerDemo'
+        default: 'demo'
         type: choice
         options:
-          - FSPlayerDemo
-          - FSPlayer
+          - demo
+          - framework
 
 jobs:
   build:
@@ -27,39 +27,44 @@ jobs:
       with:
         xcode-version: latest-stable
     
-    - name: List Available Schemes
+    - name: Install XcodeGen
       run: |
-        cd examples/ios
-        echo "=== Available Projects ==="
-        ls -la *.xcodeproj
-        echo ""
-        echo "=== FSPlayer Schemes ==="
-        xcodebuild -list -project FSPlayer.xcodeproj || true
-        echo ""
-        echo "=== FSPlayerDemo Schemes ==="
-        xcodebuild -list -project FSPlayerDemo.xcodeproj || true
+        brew install xcodegen
     
-    - name: Build IPA
+    - name: Generate Xcode Project
+      run: |
+        echo "Generating Xcode project with XcodeGen..."
+        chmod +x generate-proj.sh
+        ./generate-proj.sh
+        
+        echo "Checking generated projects..."
+        ls -la *.xcodeproj || true
+        ls -la examples/ios/*.xcodeproj || true
+    
+    - name: Build Framework
+      if: github.event.inputs.scheme == 'framework' || github.event.inputs.scheme == 'demo'
       run: |
         cd examples/ios
         
-        # 根据用户选择的 scheme 确定项目
-        if [[ "${{ github.event.inputs.scheme }}" == "FSPlayerDemo" ]]; then
-          PROJECT="FSPlayerDemo.xcodeproj"
-          SCHEME="FSPlayerDemo"
-        else
-          PROJECT="FSPlayer.xcodeproj"
-          SCHEME="FSPlayer"
-        fi
+        echo "Building FSPlayer framework..."
+        ./build-framework.sh
         
-        echo "Building $SCHEME from $PROJECT"
+        echo "Framework built successfully"
+        ls -la FSPlayer-iOS.framework || true
+    
+    - name: Build Demo IPA
+      if: github.event.inputs.scheme == 'demo'
+      run: |
+        cd examples/ios
+        
+        echo "Building FSPlayerDemo..."
         
         # 构建 Archive（不签名）
         xcodebuild archive \
-          -project "$PROJECT" \
-          -scheme "$SCHEME" \
+          -project FSPlayerDemo.xcodeproj \
+          -scheme FSPlayerDemo \
           -configuration Release \
-          -archivePath build/App.xcarchive \
+          -archivePath build/FSPlayerDemo.xcarchive \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
@@ -67,18 +72,27 @@ jobs:
         
         # 打包成 IPA
         echo "Creating unsigned IPA..."
-        cd build/App.xcarchive/Products/Applications
+        cd build/FSPlayerDemo.xcarchive/Products/Applications
         mkdir Payload
-        cp -r *.app Payload/
-        zip -r ../../../../${SCHEME}-unsigned.ipa Payload
+        cp -r FSPlayerDemo.app Payload/
+        zip -r ../../../../FSPlayerDemo-unsigned.ipa Payload
         cd ../../../..
         
-        echo "IPA created: ${SCHEME}-unsigned.ipa"
-        ls -lh *.ipa
+        echo "IPA created successfully"
+        ls -lh FSPlayerDemo-unsigned.ipa
     
-    - name: Upload IPA
+    - name: Upload Framework
+      if: github.event.inputs.scheme == 'framework'
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ github.event.inputs.scheme }}-iOS
-        path: examples/ios/*.ipa
+        name: FSPlayer-Framework
+        path: examples/ios/FSPlayer-iOS.framework
+        retention-days: 7
+    
+    - name: Upload Demo IPA
+      if: github.event.inputs.scheme == 'demo'
+      uses: actions/upload-artifact@v4
+      with:
+        name: FSPlayerDemo-iOS
+        path: examples/ios/FSPlayerDemo-unsigned.ipa
         retention-days: 7
