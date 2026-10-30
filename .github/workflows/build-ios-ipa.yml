@@ -1,98 +1,122 @@
-name: Build iOS IPA
+name: Build FSPlayer iOS IPA
+
+# 路线：不编译 ijkmedia/FFmpeg（那是 FFToolChain 的活，需要下载几百 MB 预编译库
+# 并跑完整交叉编译，CI 上要 20-40 分钟）。改为直接使用上游已经构建好的
+# FSPlayer.xcframework（动态 framework，37MB，含真机 arm64 slice），
+# 用 xcodegen 生成一个只包含 demo 源码的轻量工程，链接 xcframework 出未签名 IPA，
+# 交给 Sideloadly 重签安装。
 
 on:
   workflow_dispatch:
-    inputs:
-      scheme:
-        description: 'Target to build'
-        required: true
-        default: 'demo'
-        type: choice
-        options:
-          - demo
-          - framework
 
 jobs:
   build:
     runs-on: macos-latest
-    
+
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    
+
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
         xcode-version: latest-stable
-    
-    - name: Install XcodeGen
+
+    - name: Show toolchain
+      run: |
+        xcodebuild -version
+        sw_vers
+        xcrun --sdk iphoneos --show-sdk-version
+
+    - name: Download prebuilt FSPlayer xcframework
+      run: |
+        set -euo pipefail
+        curl -fL --retry 3 --retry-delay 2 -o /tmp/FSPlayer-iOS.zip \
+          https://github.com/debugly/fsplayer/releases/download/1.1.2-beta-6/FSPlayer-iOS.zip
+        ls -lh /tmp/FSPlayer-iOS.zip
+        unzip -q /tmp/FSPlayer-iOS.zip -d /tmp/fsplayer-dist
+        echo "=== xcframework slices ==="
+        ls -la /tmp/fsplayer-dist/FSPlayer.xcframework
+        rm -rf examples/ios/FSPlayer.xcframework
+        cp -R /tmp/fsplayer-dist/FSPlayer.xcframework examples/ios/
+        echo "=== copied ==="
+        ls -la examples/ios/FSPlayer.xcframework
+        # 确认真机 slice 是动态库
+        file examples/ios/FSPlayer.xcframework/ios-arm64/FSPlayer.framework/FSPlayer
+
+    - name: Patch demo Info.plist for modern iPad
+      run: |
+        set -euo pipefail
+        P=examples/ios/FSPlayerDemo/FSPlayerDemo-Info.plist
+        # 原值 armv7 会让 arm64 iPad 装不上，换成 arm64
+        plutil -replace UIRequiredDeviceCapabilities -json '["arm64"]' "$P"
+        # iPad 方向原本只有倒置，改为四方向，方便横屏看视频
+        plutil -replace "UISupportedInterfaceOrientations~ipad" -json '["UIInterfaceOrientationPortrait","UIInterfaceOrientationLandscapeLeft","UIInterfaceOrientationLandscapeRight","UIInterfaceOrientationPortraitUpsideDown"]' "$P"
+        echo "=== patched Info.plist (partial) ==="
+        plutil -p "$P" | grep -E "UIRequiredDeviceCapabilities|UISupportedInterfaceOrientations|CFBundleIdentifier|MinimumOS" -A3 || true
+
+    - name: Install xcodegen
       run: |
         brew install xcodegen
-    
-    - name: Generate Xcode Project
+        xcodegen --version
+
+    - name: Generate demo project
+      working-directory: examples/ios
       run: |
-        echo "Generating Xcode project with XcodeGen..."
-        chmod +x generate-proj.sh
-        ./generate-proj.sh
-        
-        echo "Checking generated projects..."
-        ls -la *.xcodeproj || true
-        ls -la examples/ios/*.xcodeproj || true
-    
-    - name: Build Framework
-      if: github.event.inputs.scheme == 'framework' || github.event.inputs.scheme == 'demo'
+        set -euo pipefail
+        xcodegen generate --spec project-demo.yml
+        echo "=== generated projects ==="
+        ls -la *.xcodeproj
+        echo "=== schemes ==="
+        xcodebuild -list -project FSPlayerDemoApp.xcodeproj
+
+    - name: Build archive
+      working-directory: examples/ios
       run: |
-        cd examples/ios
-        
-        echo "Building FSPlayer framework..."
-        ./build-framework.sh
-        
-        echo "Framework built successfully"
-        ls -la FSPlayer-iOS.framework || true
-    
-    - name: Build Demo IPA
-      if: github.event.inputs.scheme == 'demo'
-      run: |
-        cd examples/ios
-        
-        echo "Building FSPlayerDemo..."
-        
-        # 构建 Archive（不签名）
+        set -euo pipefail
         xcodebuild archive \
-          -project FSPlayerDemo.xcodeproj \
-          -scheme FSPlayerDemo \
+          -project FSPlayerDemoApp.xcodeproj \
+          -scheme FSPlayerDemoApp \
           -configuration Release \
-          -archivePath build/FSPlayerDemo.xcarchive \
+          -destination 'generic/platform=iOS' \
+          -archivePath "$PWD/build/App.xcarchive" \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
-          -allowProvisioningUpdates
-        
-        # 打包成 IPA
-        echo "Creating unsigned IPA..."
-        cd build/FSPlayerDemo.xcarchive/Products/Applications
-        mkdir Payload
-        cp -r FSPlayerDemo.app Payload/
-        zip -r ../../../../FSPlayerDemo-unsigned.ipa Payload
-        cd ../../../..
-        
-        echo "IPA created successfully"
-        ls -lh FSPlayerDemo-unsigned.ipa
-    
-    - name: Upload Framework
-      if: github.event.inputs.scheme == 'framework'
+          ARCHS=arm64 \
+          ONLY_ACTIVE_ARCH=NO \
+          2>&1 | tee /tmp/build.log
+
+    - name: Package IPA
+      working-directory: examples/ios
+      run: |
+        set -euo pipefail
+        APP=$(find build/App.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -1)
+        echo "APP=$APP"
+        ls -la "$APP"
+        echo "=== Embedded frameworks ==="
+        ls -la "$APP/Frameworks" || true
+        echo "=== Mach-O archs of app binary ==="
+        lipo -info "$APP/FSPlayerDemo" || true
+        rm -rf payload_out
+        mkdir -p payload_out/Payload
+        cp -R "$APP" payload_out/Payload/
+        (cd payload_out && zip -qry ../FSPlayerDemo.ipa Payload)
+        ls -lh FSPlayerDemo.ipa
+        echo "=== IPA contents (head) ==="
+        unzip -l FSPlayerDemo.ipa | head -40
+
+    - name: Upload IPA
       uses: actions/upload-artifact@v4
       with:
-        name: FSPlayer-Framework
-        path: examples/ios/FSPlayer-iOS.framework
+        name: FSPlayerDemo-ipa
+        path: examples/ios/FSPlayerDemo.ipa
         retention-days: 7
-    
-    - name: Upload Demo IPA
-      if: github.event.inputs.scheme == 'demo'
+
+    - name: Upload build log on failure
+      if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: FSPlayerDemo-iOS
-        path: examples/ios/FSPlayerDemo-unsigned.ipa
-        retention-days: 7
+        name: build-log
+        path: /tmp/build.log
+        retention-days: 3

@@ -1,0 +1,45 @@
+name: FSPlayerDemoApp
+options:
+  bundleIdPrefix: com.yg
+  deploymentTarget:
+    iOS: "12.0"
+  createIntermediateGroups: true
+  groupSortPosition: none
+
+targets:
+  FSPlayerDemoApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "12.0"
+    sources:
+      - path: FSPlayerDemo
+        excludes:
+          - "XCAssets/**"
+          - "FSPlayerDemo-Info.plist"
+          - "FSPlayerDemo.pch"
+    settings:
+      base:
+        PRODUCT_NAME: FSPlayerDemo
+        PRODUCT_BUNDLE_IDENTIFIER: com.yg.fsplayer
+        INFOPLIST_FILE: FSPlayerDemo/FSPlayerDemo-Info.plist
+        PREFIX_HEADER: FSPlayerDemo/FSPlayerDemo.pch
+        GCC_PRECOMPILE_PREFIX_HEADER: YES
+        CLANG_ENABLE_OBJC_ARC: YES
+        CLANG_ENABLE_MODULES: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        ENABLE_BITCODE: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGN_IDENTITY: ""
+        DEVELOPMENT_TEAM: ""
+        MARKETING_VERSION: "1.1.2"
+        CURRENT_PROJECT_VERSION: "1"
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: NO
+        SWIFT_VERSION: "5.0"
+    dependencies:
+      - framework: FSPlayer.xcframework
+        embed: true
+        codeSign: false
